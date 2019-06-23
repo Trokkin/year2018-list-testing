@@ -6,21 +6,20 @@ class list {
   struct node {
     node* next;
     node* prev;
-    node() : next(nullptr), prev(nullptr) {}
+    node() : next(this), prev(this) {}
     node(node* next, node* prev) : next(next), prev(prev) {}
+    virtual ~node() = default;
   };
   struct node_v : node {
     T value;
     node_v(T const& v) : node(nullptr, nullptr), value(v) {}
     node_v(T const& v, node* next, node* prev) : node(next, prev), value(v) {}
   };
-  node* dummy;
+  node dummy;
 
   void copyFrom(list const& other) {
-    dummy->next = dummy;
-    dummy->prev = dummy;
-    node* t = other.dummy->next;
-    while (t != other.dummy) {
+    node* t = other.dummy.next;
+    while (t != &other.dummy) {
       push_back(static_cast<node_v*>(t)->value);
       t = t->next;
     }
@@ -28,9 +27,9 @@ class list {
 
   template <typename C>
   class iterator_t {
+   public:
     node* ref;
 
-   public:
     typedef std::ptrdiff_t difference_type;
     typedef C value_type;
     typedef C* pointer;
@@ -38,21 +37,21 @@ class list {
     typedef std::bidirectional_iterator_tag iterator_category;
 
     template <typename V>
-    iterator_t(const iterator_t<V>& other,
+    iterator_t(iterator_t<V> const& other,
                typename std::enable_if<std::is_same<C, const V>::value>::type* =
                    nullptr)
         : ref(other.ref) {}
-    iterator_t(node const& v) : ref(&v) {}
+    iterator_t(node& v) : ref(&v) {}
 
     C& operator*() const { return static_cast<node_v*>(ref)->value; }
     C* operator->() const { return &(static_cast<node_v*>(ref)->value); }
 
-    iterator_t operator++(int) {
-      iterator_t<C> t(*this);
+    const iterator_t operator++(int) {
+      iterator_t t(*this);
       ref = ref->next;
       return t;
     }
-    iterator_t operator++() {
+    iterator_t& operator++() {
       ref = ref->next;
       return *this;
     }
@@ -62,12 +61,12 @@ class list {
       while (b-- && ref) t = t->next;
       return iterator_t(t);
     }
-    iterator_t operator--(int) {
-      iterator_t<C> t(*this);
+    const iterator_t operator--(int) {
+      iterator_t t(*this);
       ref = ref->prev;
       return t;
     }
-    iterator_t operator--() {
+    iterator_t& operator--() {
       ref = ref->prev;
       return *this;
     }
@@ -86,62 +85,67 @@ class list {
   };
 
  public:
-  list() : dummy(new node) {
-    dummy->next = dummy;
-    dummy->prev = dummy;
-  }
-  list(list const& other) : dummy(new node) { copyFrom(other); }
+  list() {}
+  list(list const& other) : list() { copyFrom(other); }
   list& operator=(list const& other) {
-    clear();
-    copyFrom(other);
+    if (&other != this) {
+      clear();
+      copyFrom(other);
+    }
+    return *this;
   }
 
-  ~list() {
-    clear();
-    delete dummy;
-  }
+  ~list() { clear(); }
 
-  bool empty() const noexcept { return dummy->next != dummy; };
+  bool empty() const noexcept { return dummy.next == &dummy; }
   void clear() noexcept {
-    node* n = dummy->next;
-    while (n != dummy) {
+    node* n = dummy.next;
+    while (n != &dummy) {
       node* t = n;
       n = n->next;
       delete t;
     }
+    dummy.next = &dummy;
+    dummy.prev = &dummy;
   }
 
-  void push_front(T const& val) noexcept {
-    dummy->next = new node_v(val, dummy->next, dummy);
-    dummy->next->next->prev = dummy->next;
+  void push_front(T const& val) {
+    dummy.next->prev = new node_v(val, dummy.next, &dummy);
+    dummy.next = dummy.next->prev;
   }
-  void pop_front() noexcept {
-    if (dummy->next != dummy) {
-      node* t = dummy->next;
-      dummy->next = dummy->next->next;
-      dummy->next->prev = dummy;
+  void pop_front() {
+    if (!empty()) {
+      node* t = dummy.next;
+      dummy.next = dummy.next->next;
+      dummy.next->prev = &dummy;
       delete t;
+    } else {
+      throw std::runtime_error("Tried to pop_front an empty list!");
     }
   }
-  T& front() const {  // strong
-    return static_cast<node_v*>(dummy->next)->value;
+  T const& front() const noexcept {
+    return static_cast<node_v*>(dummy.next)->value;
   }
+  T& front() noexcept { return static_cast<node_v*>(dummy.next)->value; }
 
-  void push_back(T const& val) noexcept {
-    dummy->prev = new node_v(val, dummy, dummy->prev);
-    dummy->prev->prev->next = dummy->prev;
+  void push_back(T const& val) {
+    dummy.prev->next = new node_v(val, &dummy, dummy.prev);
+    dummy.prev = dummy.prev->next;
   }
-  void pop_back() noexcept {
-    if (dummy->prev != dummy) {
-      node* t = dummy->prev;
-      dummy->prev = dummy->prev->prev;
-      dummy->prev->next = dummy;
-      delete t;
+  void pop_back() {
+    if (!empty()) {
+      auto removed = dummy.prev;
+      dummy.prev->prev->next = &dummy;
+      dummy.prev = dummy.prev->prev;
+      delete removed;
+    } else {
+      throw std::runtime_error("Tried to pop_back an empty list!");
     }
   }
-  T& back() const {  // strong
-    return static_cast<node_v*>(dummy->prev)->value;
+  T const& back() const noexcept {
+    return static_cast<node_v*>(dummy.prev)->value;
   }
+  T& back() noexcept { return static_cast<node_v*>(dummy.prev)->value; }
 
   typedef iterator_t<const T> const_iterator;
   typedef iterator_t<T> iterator;
@@ -149,54 +153,74 @@ class list {
   typedef std::reverse_iterator<iterator> reverse_iterator;
 
   const_iterator begin() const noexcept {
-    return const_iterator(*(dummy->next));
+    return const_iterator(*(dummy.next));
   }
-  const_iterator end() const noexcept { return const_iterator(*(dummy->prev)); }
-  iterator begin() noexcept { return iterator(*(dummy->next)); }
-  iterator end() noexcept { return iterator(*(dummy->prev)); }
+  const_iterator end() const noexcept {
+    return const_iterator(*(dummy.prev->next));
+  }
+  iterator begin() noexcept { return iterator(*(dummy.next)); }
+  iterator end() noexcept { return iterator(*(dummy.prev->next)); }
   reverse_const_iterator rbegin() const noexcept {
-    return reverse_const_iterator(*(dummy->next));
+    return reverse_const_iterator(*(dummy.prev->next));
   }
   reverse_const_iterator rend() const noexcept {
-    return reverse_const_iterator(*(dummy->prev));
+    return reverse_const_iterator(*(dummy.next));
   }
   reverse_iterator rbegin() noexcept {
-    return reverse_iterator(*(dummy->next));
+    return reverse_iterator(*(dummy.prev->next));
   }
-  reverse_iterator rend() noexcept { return reverse_iterator(*(dummy->prev)); }
+  reverse_iterator rend() noexcept { return reverse_iterator(*(dummy.next)); }
 
   iterator insert(const_iterator pos, T const& v) {
-    node* n = new node_v(v, pos.ref->next, pos.ref);
+    node_v* n = new node_v(v, pos.ref, pos.ref->prev);
     n->next->prev = n;
     n->prev->next = n;
-    return iterator(n);
+    return iterator(*n);
   }
 
   iterator erase(const_iterator pos) {
-    if (pos.ref != dummy) {
+    if (!empty()) {
       pos.ref->next->prev = pos.ref->prev;
       pos.ref->prev->next = pos.ref->next;
-      iterator r(pos.ref->prev);
+      iterator r = iterator(*(pos.ref->next));
       delete pos.ref;
       return r;
     }
-    return iterator(pos.ref);
+    throw std::runtime_error("empty container");
   }
-  void splice(const_iterator pos, list& other, const_iterator first,
-              const_iterator last) {
-    pos.ref->next->prev = last.ref->prev;
-    last.ref->prev->next = pos.ref->next;
-    last.ref->prev = first.ref->prev;
-    first.ref->prev->next = last.ref;
-    pos.ref->next = first.ref;
-    first.ref->prev = pos.ref;
+  iterator splice(const_iterator pos, list& other, const_iterator first,
+                  const_iterator last) {
+    if (first.ref != last.ref) {
+      last.ref->prev->next = pos.ref;
+      pos.ref->prev->next = first.ref;
+      first.ref->prev->next = last.ref;
+      node* t = pos.ref->prev;
+      pos.ref->prev = last.ref->prev;
+      last.ref->prev = first.ref->prev;
+      first.ref->prev = t;
+    }
+    return iterator(*(pos.ref));
   }
 
   template <typename V>
   friend void swap(list<V>&, list<V>&) noexcept;
 };
 
-template <typename T>
-void swap(list<T>& a, list<T>& b) noexcept {
-  swap(a.dummy, b.dummy);
+template <typename V>
+void swap(list<V>& a, list<V>& b) noexcept {
+  if (a.empty()) {
+    a.dummy.prev = &b.dummy;
+    a.dummy.next = &b.dummy;
+  } else {
+    a.dummy.prev->next = &b.dummy;
+    a.dummy.next->prev = &b.dummy;
+  }
+  if (b.empty()) {
+    b.dummy.prev = &a.dummy;
+    b.dummy.next = &a.dummy;
+  } else {
+    b.dummy.prev->next = &a.dummy;
+    b.dummy.next->prev = &a.dummy;
+  }
+  std::swap(a.dummy, b.dummy);
 }
